@@ -1,1 +1,90 @@
+import torch
+from torch import nn
+from nbeats_pytorch.model import NBeats
+from nbeats_pytorch.utils import load_checkpoint, save_checkpoint
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_absolute_error
+from sklearn.model_selection import train_test_split
+
+# Load or preprocess your stock price data (assuming it's in a DataFrame)
+# For this example, I'll generate random data
+np.random.seed(42)
+data = np.random.rand(500, 1) * 10 + np.sin(np.linspace(0, 100, 500)) + np.random.randn(500, 1)
+df = pd.DataFrame(data, columns=['Close'])
+
+# Normalize the data
+scaler = MinMaxScaler()
+df['Close'] = scaler.fit_transform(df[['Close']])
+
+# Define a function to create input sequences for the model
+def create_sequences(data, seq_length):
+    sequences = []
+    for i in range(len(data) - seq_length):
+        seq = data[i:i+seq_length]
+        label = data[i+seq_length:i+seq_length+1]
+        sequences.append((seq, label))
+    return sequences
+
+# Create sequences with a chosen sequence length
+sequence_length = 10
+sequences = create_sequences(df['Close'].values, sequence_length)
+
+# Split the data into training and testing sets
+train_size = int(len(sequences) * 0.8)
+train_data, test_data = sequences[:train_size], sequences[train_size:]
+
+# Convert the sequences to PyTorch tensors
+X_train, y_train = zip(*train_data)
+X_test, y_test = zip(*test_data)
+
+X_train = torch.FloatTensor(X_train)
+y_train = torch.FloatTensor(y_train)
+X_test = torch.FloatTensor(X_test)
+y_test = torch.FloatTensor(y_test)
+
+# Define the N-BEATS model
+model = NBeats(input_size=1, forecast_length=1, stack_types=[NBeats.GENERIC_BLOCK], device="cuda")
+
+# Define the loss function and optimizer
+criterion = nn.MSELoss()
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
+# Training loop
+num_epochs = 100
+for epoch in range(num_epochs):
+    model.train()
+    optimizer.zero_grad()
+    y_pred = model(X_train)
+    loss = criterion(y_pred.squeeze(), y_train.squeeze())
+    loss.backward()
+    optimizer.step()
+
+    if (epoch+1) % 10 == 0:
+        print(f'Epoch [{epoch+1}/{num_epochs}], Loss: {loss.item():.4f}')
+
+# Evaluation
+model.eval()
+with torch.no_grad():
+    y_pred_test = model(X_test)
+
+# Inverse transform the predictions and true values
+y_pred_test = scaler.inverse_transform(y_pred_test.cpu().numpy())
+y_true_test = scaler.inverse_transform(y_test.cpu().numpy())
+
+# Calculate Mean Absolute Error (MAE)
+mae = mean_absolute_error(y_true_test, y_pred_test)
+print(f'Mean Absolute Error on Test Data: {mae:.4f}')
+
+# Plot the results
+plt.figure(figsize=(12, 6))
+plt.plot(y_true_test, label='True Values')
+plt.plot(y_pred_test, label='Predictions')
+plt.title('Stock Price Prediction with N-BEATS')
+plt.xlabel('Time')
+plt.ylabel('Stock Price')
+plt.legend()
+plt.show()
 
